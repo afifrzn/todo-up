@@ -42,15 +42,17 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	conn.Write([]byte("Simple TODO App Using GoLang\n"))
-	conn.Write([]byte("Masukkan Username: "))
-	reader := bufio.NewReader(conn)
-	username, err := reader.ReadString('\n')
-	if err != nil {
-		return
-	}
-	username = strings.TrimSpace(username)
-	fmt.Printf("User '%s' connected from %s\n", username, conn.RemoteAddr())
+conn.Write([]byte("Masukkan Username: "))
+reader := bufio.NewReader(conn)
+username, err := reader.ReadString('\n')
+if err != nil {
+    return
+}
+username = strings.TrimSpace(username)
+fmt.Printf("User '%s' connected from %s\n", username, conn.RemoteAddr())
 
+conn.Write([]byte("Halo " + username + "!\n"))
+conn.Write([]byte("Gunakan perintah: add <task>, list, done <no>, exit\n\n"))
 	loadTasks(username)
 
 	for {
