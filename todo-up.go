@@ -4,6 +4,7 @@ import (
     "bufio"
     "encoding/json"
     "fmt"
+    "net"
     "os"
     "strconv"
     "strings"
@@ -14,114 +15,100 @@ type Task struct {
     Done        bool
 }
 
-var tasks []Task
-var username string
-var fileName string
-
 func main() {
-    // Input username di awal
-    fmt.Print("Masukkan username: ")
-    fmt.Scanln(&username)
-    fileName = fmt.Sprintf("tasks_%s.json", username)
-
-    loadTasks()
-
-    reader := bufio.NewReader(os.Stdin)
+    ln, err := net.Listen("tcp", ":8080")
+    if err != nil {
+        fmt.Println("Error starting server:", err)
+        return
+    }
+    fmt.Println("Listening on port 8080...")
 
     for {
-        fmt.Println("\n===== MENU TO-DO =====")
-        fmt.Println("1. Tambah tugas")
-        fmt.Println("2. Lihat semua tugas")
-        fmt.Println("3. Tandai tugas selesai")
-        fmt.Println("4. Keluar")
-        fmt.Print("Pilih menu: ")
+        conn, err := ln.Accept()
+        if err != nil {
+            fmt.Println("Connection error:", err)
+            continue
+        }
+        go handleConnection(conn)
+    }
+}
 
-        input, _ := reader.ReadString('\n')
-        input = strings.TrimSpace(input)
+func handleConnection(conn net.Conn) {
+    defer conn.Close()
+    conn.Write([]byte("Welcome to TODO Netcat!\nEnter your username: "))
 
-        switch input {
-        case "1":
-            fmt.Print("Masukkan deskripsi tugas: ")
-            desc, _ := reader.ReadString('\n')
-            addTask(strings.TrimSpace(desc))
-        case "2":
-            listTasks()
-        case "3":
-            listTasks()
-            fmt.Print("Masukkan nomor tugas yang selesai: ")
-            numStr, _ := reader.ReadString('\n')
-            index, err := strconv.Atoi(strings.TrimSpace(numStr))
-            if err != nil || index < 1 || index > len(tasks) {
-                fmt.Println("Nomor tidak valid.")
+    scanner := bufio.NewScanner(conn)
+    if !scanner.Scan() {
+        return
+    }
+    username := strings.TrimSpace(scanner.Text())
+    filename := fmt.Sprintf("tasks_%s.json", username)
+    tasks := loadTasks(filename)
+
+    conn.Write([]byte(fmt.Sprintf("Hi %s! You can now use commands: add, list, done\n", username)))
+
+    for scanner.Scan() {
+        input := scanner.Text()
+        args := strings.Fields(input)
+        if len(args) == 0 {
+            continue
+        }
+
+        cmd := args[0]
+        switch cmd {
+        case "add":
+            desc := strings.Join(args[1:], " ")
+            tasks = append(tasks, Task{Description: desc})
+            conn.Write([]byte("Task added.\n"))
+        case "list":
+            if len(tasks) == 0 {
+                conn.Write([]byte("No tasks found.\n"))
                 continue
             }
-            markDone(index - 1)
-        case "4":
-            fmt.Println("Keluar. Sampai jumpa!")
-            saveTasks()
-            return
+            for i, task := range tasks {
+                status := " "
+                if task.Done {
+                    status = "x"
+                }
+                conn.Write([]byte(fmt.Sprintf("[%s] %d: %s\n", status, i+1, task.Description)))
+            }
+        case "done":
+            if len(args) < 2 {
+                conn.Write([]byte("Usage: done <task number>\n"))
+                continue
+            }
+            idx, err := strconv.Atoi(args[1])
+            if err != nil || idx < 1 || idx > len(tasks) {
+                conn.Write([]byte("Invalid task number.\n"))
+                continue
+            }
+            tasks[idx-1].Done = true
+            conn.Write([]byte("Marked as done.\n"))
         default:
-            fmt.Println("Pilihan tidak dikenal.")
+            conn.Write([]byte("Unknown command.\n"))
         }
-
-        saveTasks()
+        saveTasks(filename, tasks)
     }
 }
 
-func addTask(description string) {
-    tasks = append(tasks, Task{Description: description})
-    fmt.Println("Tugas ditambahkan:", description)
-}
-
-func listTasks() {
-    if len(tasks) == 0 {
-        fmt.Println("Belum ada tugas.")
-        return
-    }
-    fmt.Println("\nDaftar Tugas:")
-    for i, task := range tasks {
-        status := " "
-        if task.Done {
-            status = "x"
-        }
-        fmt.Printf("[%s] %d: %s\n", status, i+1, task.Description)
-    }
-}
-
-func markDone(index int) {
-    tasks[index].Done = true
-    fmt.Println("Tugas ditandai selesai:", tasks[index].Description)
-}
-
-func saveTasks() {
-    file, err := os.Create(fileName)
+func loadTasks(filename string) []Task {
+    file, err := os.Open(filename)
     if err != nil {
-        fmt.Println("Gagal menyimpan tugas:", err)
-        return
+        return []Task{}
     }
     defer file.Close()
 
-    encoder := json.NewEncoder(file)
-    err = encoder.Encode(tasks)
-    if err != nil {
-        fmt.Println("Gagal encode data:", err)
-    }
+    var tasks []Task
+    json.NewDecoder(file).Decode(&tasks)
+    return tasks
 }
 
-func loadTasks() {
-    file, err := os.Open(fileName)
+func saveTasks(filename string, tasks []Task) {
+    file, err := os.Create(filename)
     if err != nil {
-        if os.IsNotExist(err) {
-            return
-        }
-        fmt.Println("Gagal membuka file:", err)
+        fmt.Println("Error saving tasks:", err)
         return
     }
     defer file.Close()
-
-    decoder := json.NewDecoder(file)
-    err = decoder.Decode(&tasks)
-    if err != nil {
-        fmt.Println("Gagal membaca data tugas:", err)
-    }
+    json.NewEncoder(file).Encode(tasks)
 }
